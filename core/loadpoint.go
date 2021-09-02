@@ -959,10 +959,10 @@ func (lp *LoadPoint) oscillationAmplitude(lastPower float64) float64 {
 		return float64(0)
 	}
 
-	// Add latest current. Now len(deltaHistory) == deltaHistorySize
+	// Add latest value. Now len(deltaHistory) == deltaHistorySize
 	deltaHistory = append(deltaHistory, lastPower)
 
-	// add and subtract the currents in alternation (poor man's FFT of highest frequency)
+	// add and subtract the values in alternation (poor man's FFT of highest frequency)
 	var amplitude float64 = 0.0
 	for _, power := range deltaHistory {
 		amplitude = power - amplitude
