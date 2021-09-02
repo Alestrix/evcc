@@ -33,6 +33,8 @@ const (
 	minActiveCurrent      = 1.0 // minimum current at which a phase is treated as active
 	vehicleDetectInterval = 3 * time.Minute
 	vehicleDetectDuration = 10 * time.Minute
+
+	deltaHistorySize = 4 // remember this many delta currents. deltaHistorySize should be an even number
 )
 
 // PollConfig defines the vehicle polling mode and interval
@@ -135,6 +137,8 @@ type LoadPoint struct {
 
 	tasks []func() error // task list for repeated execution
 }
+
+var deltaHistory = make([]float64, 0, deltaHistorySize)
 
 // NewLoadPointFromConfig creates a new loadpoint
 func NewLoadPointFromConfig(log *util.Logger, cp configProvider, other map[string]interface{}) (*LoadPoint, error) {
@@ -941,6 +945,40 @@ func (lp *LoadPoint) pvScalePhases(availablePower, minCurrent, maxCurrent float6
 	return false
 }
 
+// oscillationAmplitude returns the average amplitude of delta
+// current oscillation over the last deltaHistorySize cycles
+// ASSUMPTION: function is only called once per cycle
+func (lp *LoadPoint) oscillationAmplitude(lastCurrent float64) float64 {
+	// TODO: contemplate to move from slice to type Ring (container/ring)
+
+	lp.log.DEBUG.Printf("oscillationAmplitude called with current %f", lastCurrent)
+
+	// Don't do anything if history not sufficiently filled
+	if len(deltaHistory) < deltaHistorySize-1 {
+		lp.log.DEBUG.Printf("oscillationAmplitude - too view values")
+		return float64(0)
+	}
+
+	// Add latest current. Now len(deltaHistory) == deltaHistorySize
+	deltaHistory = append(deltaHistory, lastCurrent)
+
+	// add and subtract the currents in alternation (poor man's FFT of highest frequency)
+	var amplitude float64 = 0.0
+	for _, current := range deltaHistory {
+		amplitude = current - amplitude
+	}
+
+	// normalize to number of elements
+	amplitude /= float64(deltaHistorySize)
+
+	lp.log.DEBUG.Printf("oscillationAmplitude - slice: %v, amplitude: %f", deltaHistory, amplitude)
+
+	// Throw away oldest element, now len is deltaHistorySize-1
+	deltaHistory = deltaHistory[1:]
+
+	return math.Abs(amplitude)
+}
+
 // pvMaxCurrent calculates the maximum target current for PV mode
 func (lp *LoadPoint) pvMaxCurrent(mode api.ChargeMode, sitePower float64) float64 {
 	// read only once to simplify testing
@@ -950,7 +988,15 @@ func (lp *LoadPoint) pvMaxCurrent(mode api.ChargeMode, sitePower float64) float6
 	// calculate target charge current from delta power and actual current
 	effectiveCurrent := lp.effectiveCurrent()
 	deltaCurrent := powerToCurrent(-sitePower, lp.activePhases)
-	targetCurrent := math.Max(effectiveCurrent+deltaCurrent, 0)
+	var targetCurrent float64
+
+	// decide whether attenuation should occur
+	// attenuate only when going up
+	if lp.oscillationAmplitude(deltaCurrent) > 200 && deltaCurrent > 0 {
+		targetCurrent = math.Max(effectiveCurrent+deltaCurrent/2, 0)
+	} else {
+		targetCurrent = math.Max(effectiveCurrent+deltaCurrent, 0)
+	}
 
 	lp.log.DEBUG.Printf("max charge current: %.3gA = %.3gA + %.3gA (%.0fW @ %dp)", targetCurrent, effectiveCurrent, deltaCurrent, sitePower, lp.activePhases)
 
