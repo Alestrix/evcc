@@ -945,13 +945,13 @@ func (lp *LoadPoint) pvScalePhases(availablePower, minCurrent, maxCurrent float6
 	return false
 }
 
-// oscillationAmplitude returns the average amplitude of delta
-// current oscillation over the last deltaHistorySize cycles
+// oscillationAmplitude returns the average amplitude of site
+// power oscillation over the last deltaHistorySize cycles
 // ASSUMPTION: function is only called once per cycle
-func (lp *LoadPoint) oscillationAmplitude(lastCurrent float64) float64 {
+func (lp *LoadPoint) oscillationAmplitude(lastPower float64) float64 {
 	// TODO: contemplate to move from slice to type Ring (container/ring)
 
-	lp.log.DEBUG.Printf("oscillationAmplitude called with current %f", lastCurrent)
+	lp.log.DEBUG.Printf("oscillationAmplitude called with power %f", lastPower)
 
 	// Don't do anything if history not sufficiently filled
 	if len(deltaHistory) < deltaHistorySize-1 {
@@ -960,12 +960,12 @@ func (lp *LoadPoint) oscillationAmplitude(lastCurrent float64) float64 {
 	}
 
 	// Add latest current. Now len(deltaHistory) == deltaHistorySize
-	deltaHistory = append(deltaHistory, lastCurrent)
+	deltaHistory = append(deltaHistory, lastPower)
 
 	// add and subtract the currents in alternation (poor man's FFT of highest frequency)
 	var amplitude float64 = 0.0
-	for _, current := range deltaHistory {
-		amplitude = current - amplitude
+	for _, power := range deltaHistory {
+		amplitude = power - amplitude
 	}
 
 	// normalize to number of elements
@@ -992,7 +992,7 @@ func (lp *LoadPoint) pvMaxCurrent(mode api.ChargeMode, sitePower float64) float6
 
 	// decide whether attenuation should occur
 	// attenuate only when going up
-	if lp.oscillationAmplitude(deltaCurrent) > 200 && deltaCurrent > 0 {
+	if lp.oscillationAmplitude(sitePower) > 200 && deltaCurrent > 0 {
 		targetCurrent = math.Max(effectiveCurrent+deltaCurrent/2, 0)
 	} else {
 		targetCurrent = math.Max(effectiveCurrent+deltaCurrent, 0)
